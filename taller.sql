@@ -1,4 +1,4 @@
--- Active: 1755997714228@@127.0.0.1@5433
+-- Active: 1756054090763@@127.0.0.1@5433@demo_db
 
 -- Opcional: crea y usa el esquema
 
@@ -40,9 +40,10 @@ CREATE TABLE miscompras.productos (
 );
 
 -- Unico por código de barras si se usa, permite varios NULL
-CREATE UNIQUE INDEX IF NOT EXISTS ux_productos_codigo_barras
+CREATE UNIQUE INDEX ux_productos_codigo_barras
     ON miscompras.productos (codigo_barras)
     WHERE codigo_barras IS NOT NULL;
+
 
 CREATE INDEX IF NOT EXISTS idx_productos_id_categoria
     ON miscompras.productos (id_categoria);

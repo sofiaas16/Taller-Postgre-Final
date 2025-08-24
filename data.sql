@@ -1,4 +1,4 @@
--- Active: 1755997714228@@127.0.0.1@5433
+-- Active: 1756054090763@@127.0.0.1@5433@demo_db
 SET search_path TO miscompras;
 
 INSERT INTO miscompras.clientes (id, nombre, apellidos, celular, direccion, correo_electronico) VALUES

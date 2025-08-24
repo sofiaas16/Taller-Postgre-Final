@@ -1,3 +1,4 @@
+-- Active: 1756054090763@@127.0.0.1@5433@demo_db
 -- Obtén el “Top 10” de productos por unidades vendidas y su ingreso total, usando `JOIN ... USING`, agregación con `SUM()`, agrupación con `GROUP BY`, ordenamiento descendente con `ORDER BY` y paginado con `LIMIT`.
 
 SELECT p.nombre,
@@ -162,3 +163,142 @@ SELECT nombre, precio_venta, ROUND(((precio_venta-(precio_venta * 10))/precio_ve
 FROM miscompras.productos;
 
 -- Filtra clientes de un dominio dado usando expresiones regulares con el operador `~*` (case-insensitive) y limpieza con `TRIM()` sobre el correo electrónico.
+SELECT 
+    id,
+    nombre,
+    apellidos,
+    correo_electronico
+FROM miscompras.clientes
+WHERE TRIM(correo_electronico) ~* '@example.com$';
+
+-- Normaliza nombres y apellidos de clientes con `TRIM()` e `INITCAP()` para capitalizar, retornando columnas formateadas.
+SELECT 
+    id,
+    INITCAP(TRIM(nombre)) AS nombre_normalizado,
+    INITCAP(TRIM(apellidos)) AS apellidos_normalizados
+FROM miscompras.clientes;
+
+-- Selecciona los productos cuyo `id_producto` es par usando el operador módulo `%` en la cláusula `WHERE`.
+SELECT *
+FROM miscompras.productos
+WHERE id_producto % 2 = 0;
+
+-- Crea una vista ventas_por_compra que consolide `id_compra`,` id_cliente`, `fecha` y el `SUM(total)` por compra, 
+-- usando `CREATE OR REPLACE VIEW` y `JOIN ... USING`.
+CREATE OR REPLACE VIEW miscompras.ventas_por_compra AS
+SELECT 
+    compras.id_compra,
+    compras.id_cliente,
+    compras.fecha,
+    SUM(compras_productos.total) AS total_compra
+FROM miscompras.compras
+JOIN miscompras.compras_productos USING (id_compra)
+GROUP BY compras.id_compra, compras.id_cliente, compras.fecha;
+
+
+-- Crea una vista ventas_por_compra que consolide `id_compra`,` id_cliente`, `fecha` y el `SUM(total)` por compra, 
+--usando `CREATE OR REPLACE VIEW` y `JOIN ... USING`.
+CREATE OR REPLACE VIEW miscompras.ventas_por_compra AS
+SELECT 
+    c.id_compra,
+    c.id_cliente,
+    c.fecha,
+    SUM(cp.total) AS total_compra
+FROM miscompras.compras c
+JOIN miscompras.compras_productos cp USING (id_compra)
+GROUP BY c.id_compra, c.id_cliente, c.fecha;
+
+--Crea una vista materializada mensual mv_ventas_mensuales que agregue ventas por `DATE_TRUNC('month', fecha);
+--` recuerda refrescarla con `REFRESH MATERIALIZED VIEW` cuando corresponda.
+CREATE MATERIALIZED VIEW IF NOT EXISTS miscompras.mv_ventas_mensuales AS
+SELECT 
+    DATE_TRUNC('month', c.fecha) AS mes,
+    SUM(cp.total) AS total_mes
+FROM miscompras.compras c
+JOIN miscompras.compras_productos cp USING (id_compra)
+GROUP BY DATE_TRUNC('month', c.fecha);
+
+-- Realiza un “UPSERT” de un producto referenciado por codigo_barras usando `INSERT ... ON CONFLICT (...) DO UPDATE`, actualizando nombre y precio_venta cuando exista conflicto.
+INSERT INTO miscompras.productos (nombre, id_categoria, codigo_barras, precio_venta, cantidad_stock, estado)
+VALUES ('Producto Nuevo',1,'123456789',5000,100,1)
+ON CONFLICT (codigo_barras) DO UPDATE
+SET nombre = EXCLUDED.nombre,
+    precio_venta = EXCLUDED.precio_venta;
+
+--Recalcula el stock descontando lo vendido a partir de un `UPDATE ... FROM (SELECT ... GROUP BY ...)`, empleando `COALESCE()` y `GREATEST()` para evitar negativos.
+UPDATE miscompras.productos p
+SET cantidad_stock = GREATEST(
+    p.cantidad_stock - COALESCE(v.vendido, 0), 0
+)
+FROM (
+    SELECT 
+        id_producto,
+        SUM(cantidad) AS vendido
+    FROM miscompras.compras_productos
+    GROUP BY id_producto
+) v
+WHERE p.id_producto = v.id_producto;
+
+-- Implementa una función PL/pgSQL (`miscompras.fn_total_compra`) que reciba `p_id_compra` y retorne el `total` con `COALESCE(SUM(...), 0);` define el tipo de retorno `NUMERIC(16,2)`.
+CREATE OR REPLACE FUNCTION miscompras.fn_total_compra(p_id_compra INT)
+RETURNS NUMERIC(16,2)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_total NUMERIC(16,2);
+BEGIN
+    SELECT COALESCE(SUM(total), 0)
+    INTO v_total
+    FROM miscompras.compras_productos
+    WHERE id_compra = p_id_compra;
+
+    RETURN v_total;
+END;
+$$;
+
+-- Define un trigger `AFTER INSERT` sobre `compras_productos` que descuente stock mediante una función `RETURNS TRIGGER` y el uso del registro `NEW`, protegiendo con `GREATEST()` para no quedar bajo cero.
+CREATE OR REPLACE FUNCTION miscompras.fn_descuento_stock()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE miscompras.productos
+    SET cantidad_stock = GREATEST(cantidad_stock - NEW.cantidad, 0)
+    WHERE id_producto = NEW.id_producto;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_descuento_stock
+AFTER INSERT ON miscompras.compras_productos
+FOR EACH ROW
+EXECUTE FUNCTION miscompras.fn_descuento_stock();
+
+-- Asigna la “posición por precio” de cada producto dentro de su categoría con `DENSE_RANK() OVER (PARTITION BY ... ORDER BY precio_venta DESC)` y presenta el ranking.
+SELECT 
+    p.id_producto,
+    p.nombre,
+    p.id_categoria,
+    p.precio_venta,
+    DENSE_RANK() OVER (PARTITION BY p.id_categoria ORDER BY p.precio_venta DESC) AS posicion_precio
+FROM miscompras.productos p;
+
+-- Para cada cliente, muestra su gasto por compra, el gasto anterior y el delta entre compras usando `LAG(...) OVER (PARTITION BY id_cliente ORDER BY dia)` dentro de un `CTE` que agrega por día.
+
+WITH gasto_diario AS (
+    SELECT 
+        c.id_cliente,
+        DATE(c.fecha) AS dia,
+        SUM(cp.total) AS gasto
+    FROM miscompras.compras c
+    JOIN miscompras.compras_productos cp USING (id_compra)
+    GROUP BY c.id_cliente, DATE(c.fecha)
+)
+SELECT 
+    id_cliente,
+    dia,
+    gasto,
+    LAG(gasto) OVER (PARTITION BY id_cliente ORDER BY dia) AS gasto_anterior,
+    gasto - COALESCE(LAG(gasto) OVER (PARTITION BY id_cliente ORDER BY dia), 0) AS delta
+FROM gasto_diario
+ORDER BY id_cliente, dia;
