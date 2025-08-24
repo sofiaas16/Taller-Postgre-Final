@@ -90,7 +90,7 @@ SELECT nombre,
        CASE
          WHEN cantidad_stock < 50  THEN 'CRÍTICO'
          WHEN cantidad_stock < 200 THEN 'BAJO'
-         ELSE 'OK'
+         ELSE 'esta OK'
        END AS nivel_stock
 FROM miscompras.productos
 WHERE estado = 1
@@ -110,9 +110,16 @@ ORDER BY c.id, co.fecha DESC;
 
 -- Devuelve los 2 productos más vendidos por categoría usando una subconsulta con `ROW_NUMBER() OVER (PARTITION BY ... ORDER BY SUM(...) DESC)` y luego filtrando `ROW_NUMBER` <= 2.
 SELECT categoria, nombre, unidades_vendidas
-FROM miscompras.categorias cat
-JOIN 
-ORDER BY ; 
+FROM (
+    SELECT cat.descripcion AS categoria,
+           p.nombre, SUM(cp.cantidad) AS unidades_vendidas, ROW_NUMBER() OVER (PARTITION BY cat.descripcion ORDER BY SUM(cp.cantidad) DESC) AS rn
+    FROM miscompras.compras_productos cp
+    JOIN miscompras.productos p USING (id_producto)
+    JOIN miscompras.categorias cat USING (id_categoria)
+    GROUP BY cat.descripcion, p.nombre
+) sub
+WHERE rn <= 2
+ORDER BY categoria, unidades_vendidas DESC;
 
 -- Calcula ventas mensuales: agrupa por mes truncando la fecha con `DATE_TRUNC('month', fecha)`, cuenta compras distintas (`COUNT(DISTINCT ...)`) y suma ventas, ordenando cronológicamente.
 SELECT DATE_TRUNC('month', co.fecha) AS mes, COUNT(DISTINCT co.id_compra) AS num_compras, ROUND(SUM(cp.total),2) AS total_ventas
@@ -131,7 +138,7 @@ WHERE NOT EXISTS(
 );
 
 -- Identifica clientes que, al comprar “café”, también compran “pan” en la misma compra, usando un filtro con `ILIKE` y una subconsulta correlacionada con `EXISTS`.
-SELECT DISTINCT c.id, c.nombre  ' '  c.apellidos AS cliente
+SELECT DISTINCT c.id, c.nombre, c.apellidos AS cliente
 FROM miscompras.clientes c
 JOIN miscompras.compras co ON co.id_cliente = c.id
 WHERE EXISTS (
@@ -151,6 +158,7 @@ AND EXISTS (
 
 
 -- Estima el margen porcentual “simulado” de un producto aplicando operadores aritméticos sobre precio_venta y formateo con `ROUND()` a un decimal.
-SELECT nombre, precio_venta, ROUND(((precio_venta-(precio-venta * 10))/precio_venta)*100) AS margen
+SELECT nombre, precio_venta, ROUND(((precio_venta-(precio_venta * 10))/precio_venta)*100) AS margen
 FROM miscompras.productos;
 
+-- Filtra clientes de un dominio dado usando expresiones regulares con el operador `~*` (case-insensitive) y limpieza con `TRIM()` sobre el correo electrónico.
