@@ -151,4 +151,6 @@ AND EXISTS (
 
 
 -- Estima el margen porcentual “simulado” de un producto aplicando operadores aritméticos sobre precio_venta y formateo con `ROUND()` a un decimal.
-SELECT 
+SELECT nombre, precio_venta, ROUND(((precio_venta-(precio-venta * 10))/precio_venta)*100) AS margen
+FROM miscompras.productos;
+
